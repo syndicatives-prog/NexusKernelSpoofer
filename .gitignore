@@ -1,0 +1,11 @@
+*.sys
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+Build/
+.vs/
+Debug/
+Release/
+*.log
