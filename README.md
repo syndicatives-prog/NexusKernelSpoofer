@@ -4,6 +4,10 @@
 
 Controlador de kernel ultraprofesional diseñado para la suplantación completa de hardware contra EAC y otros sistemas antitrampas.
 
+## Estado actual
+
+El proyecto tiene una estructura profesional completa. El código de los módulos está siendo implementado de forma real (no solo placeholders). Ver commits recientes para el código funcional.
+
 ## Características
 
 - Suplantación completa de hardware (disco, SMBIOS, MAC, CPUID, GPU, RAM, placa base, HWID, TPM)
@@ -12,15 +16,6 @@ Controlador de kernel ultraprofesional diseñado para la suplantación completa 
 - Optimizado contra Easy Anti-Cheat (EAC) y otros sistemas antitrampas a nivel de kernel.
 - Soporte para Windows 11 24H2 / 25H2
 
-## Estructura del Proyecto
-
-- `driver/src/NexusKernelSpoofer.c`: Código principal del controlador con todos los módulos integrados (DriverEntry, hooks, spoofers, protección).
-- `config/`: Configuración del spoofer.
-- `documentos/`: Documentación adicional.
-- `conductor/`: Archivos del conductor (driver).
-
 ## Advertencia
 
-Uso solo para fines educativos y de investigación. No usar en juegos online ni para violar términos de servicio de plataformas de gaming.
-
-**Este es un punto de partida sólido para investigación en seguridad de kernel y anti-cheat. Prueba siempre en entornos controlados (VMs).**
+Uso solo para fines educativos y de investigación. No usar en juegos online.

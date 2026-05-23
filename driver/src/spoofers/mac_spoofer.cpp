@@ -3,4 +3,5 @@
 // MAC address spoofing for all network interfaces
 void SpoofMACAddresses() {
     // Hook NDIS and spoof all adapters
+    // Real implementation uses NDIS filter driver or hooks OID queries
 }
