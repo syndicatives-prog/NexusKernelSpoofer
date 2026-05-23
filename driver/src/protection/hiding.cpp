@@ -1,6 +1,5 @@
-#include "common.h"
 #include "hiding.h"
-
+#include "common.h"
 void HideDriver() {
     PLDR_DATA_TABLE_ENTRY entry = (PLDR_DATA_TABLE_ENTRY)g_DeviceObject->DriverObject->DriverSection;
     if (entry) {

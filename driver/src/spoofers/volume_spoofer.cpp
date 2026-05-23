@@ -1,11 +1,8 @@
+#include "volume_spoofer.h"
 #include "common.h"
 #include "hooks.h"
-#include "volume_spoofer.h"
-
 typedef NTSTATUS (*NTQUERYVOLUMEINFORMATIONFILE)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FS_INFORMATION_CLASS);
 static NTQUERYVOLUMEINFORMATIONFILE g_Original = NULL;
-static HOOK_INFO g_Hook = { 0 };
-
 static NTSTATUS Hooked(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusBlock,
                        PVOID FileInformation, ULONG Length, FS_INFORMATION_CLASS FsInformationClass) {
     NTSTATUS status = g_Original(FileHandle, IoStatusBlock, FileInformation, Length, FsInformationClass);
@@ -19,15 +16,10 @@ static NTSTATUS Hooked(HANDLE FileHandle, PIO_STATUS_BLOCK IoStatusBlock,
     }
     return status;
 }
-
 void InitVolumeSpoofer() {
     UNICODE_STRING name;
     RtlInitUnicodeString(&name, L"NtQueryVolumeInformationFile");
     g_Original = (NTQUERYVOLUMEINFORMATIONFILE)MmGetSystemRoutineAddress(&name);
-    if (g_Original)
-        InstallHookX64(g_Original, Hooked, &g_Hook);
+    if (g_Original) InstallHookX64(g_Original, Hooked, &g_VolHook);
 }
-
-void CleanupVolumeSpoofer() {
-    RemoveHookX64(&g_Hook);
-}
+void CleanupVolumeSpoofer() { RemoveHookX64(&g_VolHook); }
