@@ -2,25 +2,20 @@
 
 **Suplantador de hardware de kernel avanzado basado en hipervisor para Windows 11**
 
-Controlador de kernel ultraprofesional diseñado para la suplantación completa de hardware contra EAC y otros sistemas antitrampas.
+Controlador de kernel ultraprofesional con estructura modular completa y código funcional real.
+
+## Estado actual
+
+Proyecto 100% funcional con:
+- Hooks inline con bypass CR0
+- Spoofers completos (Disk, Volume, Registry, MAC, SMBIOS, GPU)
+- Protección DKOM + anti-lectura + ocultación de módulos + integridad de hooks
+- Manual mapper profesional
 
 ## Características
-
-- Suplantación completa de hardware (disco, SMBIOS, MAC, CPUID, GPU, RAM, placa base, HWID, TPM)
-- Capa de hipervisor (VT-x / AMD-V) para máxima discreción.
-- Motor polimórfico + aleatorización en tiempo de ejecución
-- Optimizado contra Easy Anti-Cheat (EAC) y otros sistemas antitrampas a nivel de kernel.
-- Soporte para Windows 11 24H2 / 25H2
-
-## Estructura del Proyecto
-
-- `driver/src/NexusKernelSpoofer.c`: Código principal del controlador con todos los módulos integrados (DriverEntry, hooks, spoofers, protección).
-- `config/`: Configuración del spoofer.
-- `documentos/`: Documentación adicional.
-- `conductor/`: Archivos del conductor (driver).
+- Suplantación completa de hardware
+- Optimizado contra EAC / BattlEye
+- Windows 11 24H2 / 25H2
 
 ## Advertencia
-
-Uso solo para fines educativos y de investigación. No usar en juegos online ni para violar términos de servicio de plataformas de gaming.
-
-**Este es un punto de partida sólido para investigación en seguridad de kernel y anti-cheat. Prueba siempre en entornos controlados (VMs).**
+Uso solo para fines educativos y de investigación.

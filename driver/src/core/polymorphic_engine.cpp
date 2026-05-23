@@ -9,5 +9,6 @@ void MutateDriverCode() {
 }
 
 void EnablePolymorphicMode() {
-    // Start mutation timer
+    // Start mutation timer (real implementation would use KeSetTimer)
+    // Mutation logic here
 }

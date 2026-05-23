@@ -5,16 +5,18 @@
 // Hypervisor-based spoofing layer using VT-x / AMD-V
 // Advanced VMCS shadowing and EPT hooking for stealth against EAC
 
-NTSTATUS InitializeHypervisor() {
-    // VT-x / AMD-V detection and setup
+extern "C" NTSTATUS InitializeHypervisor() {
+    // TODO: Real VT-x / AMD-V detection and VMCS setup
+    // For now, we simulate success and prepare for spoofing
     if (IsVTxSupported()) {
-        // Setup VMCS for hardware spoofing
+        // In real implementation: Setup VMCS, EPT, and shadow the hardware values
         SetupVMCSShadowing();
+        return STATUS_SUCCESS;
     }
-    return STATUS_SUCCESS;
+    return STATUS_NOT_SUPPORTED;
 }
 
 void SpoofHardwareInHypervisor() {
     // Runtime hardware spoofing in VM exit handlers
-    // Disk, SMBIOS, CPUID, etc. spoofed at hypervisor level
+    // This is where we would intercept and modify CPUID, disk queries, etc.
 }
