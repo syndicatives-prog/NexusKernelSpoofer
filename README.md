@@ -3,10 +3,9 @@
 Advanced Hypervisor-based Kernel Hardware Spoofer for Windows 11.
 
 **Features:**
-- Full hardware spoofing (Disk, SMBIOS, MAC, CPUID, GPU, RAM, Motherboard, HWID)
-- VT-x / AMD-V Hypervisor layer for maximum stealth
-- Polymorphic engine with runtime mutation
-- Optimized against EAC and other kernel-level anti-cheats
-- Windows 11 24H2 / 25H2 support
+- Full hardware spoofing (Disk, SMBIOS, MAC, CPUID, GPU, RAM, etc.)
+- Hypervisor (VT-x / AMD-V) layer for maximum stealth
+- Polymorphic engine
+- Optimized against Easy Anti-Cheat (EAC)
 
-**Warning:** Use at your own risk. For educational purposes only.
+**Warning:** For educational and research purposes only.

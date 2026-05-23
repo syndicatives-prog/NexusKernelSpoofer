@@ -1,5 +1,17 @@
-*.sys
+# Build artifacts
 *.obj
+*.exe
+*.sys
 *.pdb
-build/
+*.ilk
+
+# Visual Studio
 .vs/
+*.suo
+*.sdf
+*.opensdf
+
+# CMake
+build/
+CMakeCache.txt
+CMakeFiles/
