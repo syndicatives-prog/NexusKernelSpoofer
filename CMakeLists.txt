@@ -8,6 +8,7 @@ set(SOURCES
     driver/src/core/hypervisor_asm.asm
     driver/src/core/svm.cpp
     driver/src/core/smp_vmx.cpp
+    driver/src/core/smp_svm.cpp
     driver/src/core/comm_channel.cpp
     driver/src/core/dynamic_ept.cpp
     driver/src/core/adaptive_spoofer.cpp

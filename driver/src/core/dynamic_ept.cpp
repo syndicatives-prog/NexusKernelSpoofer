@@ -6,6 +6,7 @@ static KTIMER g_DynamicTimer;
 static KDPC g_DynamicDpc;
 static PVOID g_ReservedPages[8] = {0};
 static ULONG g_ReservedIndex = 0;
+static KSPIN_LOCK g_EptLock;  // Spinlock para sincronizaci?n multi-core
 
 extern UINT64 g_HiddenPages[];
 extern UCHAR* g_FakePages[];
@@ -21,25 +22,41 @@ static PVOID AllocContiguousPhysLocal(ULONG Size, UINT64* PhysAddr) {
 }
 
 static VOID RelocateOnePage(ULONG Index) {
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_EptLock, &oldIrql);
+
     UINT64 oldPhys = g_HiddenPages[Index];
     UCHAR* oldFake = g_FakePages[Index];
-    if (!oldPhys || !oldFake) return;
-    if (g_ReservedIndex >= 8) return;
+    if (!oldPhys || !oldFake) {
+        KeReleaseSpinLock(&g_EptLock, oldIrql);
+        return;
+    }
+    if (g_ReservedIndex >= 8) {
+        KeReleaseSpinLock(&g_EptLock, oldIrql);
+        return;
+    }
     PVOID newVa = g_ReservedPages[g_ReservedIndex++];
     UINT64 newPhys = MmGetPhysicalAddress(newVa).QuadPart;
     RtlCopyMemory(newVa, oldFake, 4096);
+
     PUINT64 pte = NULL;
     int retries = 0;
     while (!pte && retries < 10) {
         pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, oldPhys);
         retries++;
     }
-    if (!pte) return;
+    if (!pte) {
+        KeReleaseSpinLock(&g_EptLock, oldIrql);
+        return;
+    }
     *pte = (newPhys & ~0xFFFULL) | (*pte & 0xFFF);
     __invept(1, NULL);
+
     ExFreePoolWithTag(oldFake, 'ekaF');
     g_HiddenPages[Index] = newPhys;
     g_FakePages[Index] = (UCHAR*)newVa;
+
+    KeReleaseSpinLock(&g_EptLock, oldIrql);
 }
 
 static VOID DynamicEptDpc(PKDPC Dpc, PVOID DeferredContext, PVOID Arg1, PVOID Arg2) {
@@ -51,7 +68,7 @@ static VOID DynamicEptDpc(PKDPC Dpc, PVOID DeferredContext, PVOID Arg1, PVOID Ar
 
 NTSTATUS InitDynamicEpt() {
     if (!g_Vmx.HypervisorActive) return STATUS_NOT_SUPPORTED;
-    // Pre-alocar p?ginas a PASSIVE_LEVEL
+    KeInitializeSpinLock(&g_EptLock);
     for (int i = 0; i < 8; i++) {
         g_ReservedPages[i] = AllocContiguousPhysLocal(4096, NULL);
         if (!g_ReservedPages[i]) return STATUS_INSUFFICIENT_RESOURCES;

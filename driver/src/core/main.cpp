@@ -3,6 +3,7 @@
 #include "hypervisor.h"
 #include "svm.h"
 #include "smp_vmx.h"
+#include "smp_svm.h"
 #include "../spoofers/disk_spoofer.h"
 #include "../spoofers/volume_spoofer.h"
 #include "../spoofers/registry_spoofer.h"
@@ -86,6 +87,7 @@ void DriverUnload(PDRIVER_OBJECT DriverObject) {
     CleanupVolumeSpoofer();
     CleanupDiskSpoofer();
     CleanupSmpVmx();
+    CleanupSmpSvm();
     if (IsAmdVSupported()) {
         CleanupAmdHypervisor();
     } else {
@@ -120,14 +122,15 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
     if (IsAmdVSupported()) {
         if (NT_SUCCESS(InitAmdHypervisor())) {
             hypervisorOk = TRUE;
+            InitSmpSvm();  // SMP para AMD
         }
     } else if (NT_SUCCESS(InitHypervisor())) {
         hypervisorOk = TRUE;
-        VmxLaunch(0, 0); // Lanzar la VM para Intel
+        VmxLaunch(0, 0);
+        InitSmpVmx();  // SMP para Intel
     }
 
     if (hypervisorOk) {
-        InitSmpVmx();  // Inicializar VMX en todos los cores
         InitDiskSpoofer();
         InitVolumeSpoofer();
         InitRegistrySpoofer();
