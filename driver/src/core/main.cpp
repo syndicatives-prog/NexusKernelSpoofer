@@ -1,6 +1,7 @@
 #include "common.h"
 #include "hooks.h"
 #include "hypervisor.h"
+#include "svm.h"
 #include "../spoofers/disk_spoofer.h"
 #include "../spoofers/volume_spoofer.h"
 #include "../spoofers/registry_spoofer.h"
@@ -83,7 +84,11 @@ void DriverUnload(PDRIVER_OBJECT DriverObject) {
     CleanupRegistrySpoofer();
     CleanupVolumeSpoofer();
     CleanupDiskSpoofer();
-    CleanupHypervisor();
+    if (IsAmdVSupported()) {
+        CleanupAmdHypervisor();
+    } else {
+        CleanupHypervisor();
+    }
     UNICODE_STRING symLink;
     RtlInitUnicodeString(&symLink, SYMLINK_NAME);
     IoDeleteSymbolicLink(&symLink);
@@ -108,7 +113,19 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
     status = IoCreateSymbolicLink(&symLink, &devName);
     if (!NT_SUCCESS(status)) { IoDeleteDevice(deviceObj); return status; }
 
-    if (NT_SUCCESS(InitHypervisor())) {
+    // Detectar y elegir el hypervisor adecuado
+    BOOLEAN hypervisorOk = FALSE;
+    if (IsAmdVSupported()) {
+        if (NT_SUCCESS(InitAmdHypervisor())) {
+            hypervisorOk = TRUE;
+            // AMD no necesita VmxLaunch, iniciamos directamente los m?dulos
+        }
+    } else if (NT_SUCCESS(InitHypervisor())) {
+        hypervisorOk = TRUE;
+        VmxLaunch(0, 0); // Lanzar la VM para Intel
+    }
+
+    if (hypervisorOk) {
         InitDiskSpoofer();
         InitVolumeSpoofer();
         InitRegistrySpoofer();
@@ -124,8 +141,8 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
         InitModuleHiding();
         HideDriver();
         InitIntegrityCheck();
-        VmxLaunch(0, 0);
     } else {
+        // Fallback: hooks cl?sicos sin hypervisor
         InitDiskSpoofer();
         InitVolumeSpoofer();
         InitRegistrySpoofer();
