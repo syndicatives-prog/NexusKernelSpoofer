@@ -1,3 +1,4 @@
 #pragma once
 
-// Hypervisor definitions
+NTSTATUS InitializeHypervisor();
+void SpoofHardwareInHypervisor();
