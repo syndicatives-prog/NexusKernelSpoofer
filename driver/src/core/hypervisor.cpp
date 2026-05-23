@@ -1,6 +1,7 @@
 #include "hypervisor.h"
 #include "../spoofers/smbios_spoofer.h"
 #include <Zydis/Zydis.h>
+#include <ntddk.h>
 
 VMX_CONTROLS g_Vmx = {0};
 static UCHAR* g_FakePages[8] = {0};
@@ -9,8 +10,8 @@ static ULONG g_PageCount = 0;
 
 UINT64 g_SmbiosPhysAddr = 0;
 UCHAR g_FakeSmbiosPage[4096] = {0};
-extern UINT64 g_DiskPhys, g_GpuPhys, g_MacPhys, g_TpmPhysBase;
-extern UCHAR g_FakeDiskSerialPage[4096], g_FakeGpuConfigPage[4096], g_FakeMacPage[4096], g_FakeTpmPage[4096];
+extern UINT64 g_GpuPhys, g_MacPhys, g_TpmPhysBase;
+extern UCHAR g_FakeGpuConfigPage[4096], g_FakeMacPage[4096], g_FakeTpmPage[4096];
 
 static PVOID AllocContiguousPhys(ULONG Size, UINT64* PhysAddr) {
     PHYSICAL_ADDRESS highest; highest.QuadPart = -1;
@@ -74,7 +75,12 @@ PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr) {
 VOID EptHidePage(UINT64 PhysAddr, BOOLEAN Hide) {
     PhysAddr &= ~0xFFFULL;
     PUINT64 pte = NULL;
-    while (!pte) pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr);
+    int retries = 0;
+    while (!pte && retries < 10) {
+        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr);
+        retries++;
+    }
+    if (!pte) return;
     if (Hide) *pte &= ~1ULL; else *pte |= 1ULL;
     __invept(1, NULL);
 }
@@ -112,7 +118,12 @@ static void ClearMTF() {
 }
 static void EmulateEptRead(UINT64 PhysAddr, PVOID FakePage) {
     PUINT64 pte = NULL;
-    while (!pte) pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr);
+    int retries = 0;
+    while (!pte && retries < 10) {
+        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr);
+        retries++;
+    }
+    if (!pte) return;
     UINT64 fakePhys = MmGetPhysicalAddress(FakePage).QuadPart;
     *pte = (fakePhys & ~0xFFFULL) | 7;
     __invept(1, NULL);
@@ -150,17 +161,30 @@ BOOLEAN HandleHvciExecuteViolation(UINT64 GuestPhysAddr, UINT64 GuestRip) {
 extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip) {
     UINT64 guestPhysAddr, exitQual;
     switch (ExitReason) {
-    case 16: { UINT64 tsc = __rdtsc() - 1000; __vmx_vmwrite(0x0000681C, (UINT32)tsc); __vmx_vmwrite(0x00006820, (UINT32)(tsc >> 32)); break; }
-    case 17: { UINT64 tsc = __rdtsc() - 1000; __vmx_vmwrite(0x0000681C, (UINT32)tsc); __vmx_vmwrite(0x00006820, (UINT32)(tsc >> 32)); break; }
-    case 18: HandleCpuidExit(); break;
-    case 31: {
+    case 16: // RDTSC
+    case 17: // RDTSCP
+    {
+        UINT64 tsc = __rdtsc() - 1000;
+        __vmx_vmwrite(0x0000681C, (UINT32)tsc);
+        __vmx_vmwrite(0x00006820, (UINT32)(tsc >> 32));
+        break;
+    }
+    case 18: // CPUID
+        HandleCpuidExit();
+        break;
+    case 31: // MSR read
+    {
         UINT64 msrId; __vmx_vmread(0x0000681C, &msrId);
         if (msrId == 0x480 || msrId == 0x3A || msrId == 0xE7 || msrId == 0xE8) {
             __vmx_vmwrite(0x0000681C, 0); __vmx_vmwrite(0x00006820, 0);
         }
         break;
     }
-    case 48:
+    case 47: // Monitor Trap Flag
+        for (ULONG i = 0; i < g_PageCount; i++) if (g_HiddenPages[i]) EptHidePage(g_HiddenPages[i], TRUE);
+        ClearMTF();
+        break;
+    case 48: // EPT violation
         __vmx_vmread(0x00002400, &guestPhysAddr);
         __vmx_vmread(0x00006400, &exitQual);
         BOOLEAN isRead = (exitQual & 1) == 0;
@@ -172,10 +196,6 @@ extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip) {
                 break;
             }
         }
-        break;
-    case 17:
-        for (ULONG i = 0; i < g_PageCount; i++) if (g_HiddenPages[i]) EptHidePage(g_HiddenPages[i], TRUE);
-        ClearMTF();
         break;
     }
     return 0;
@@ -208,11 +228,27 @@ NTSTATUS InitHypervisor() {
     for (int i = 0; i < 4; i++) pdpt[i] = (i * 0x40000000ULL) | 0x87;
     UINT64 eptp = g_Vmx.EptPml4Phys | (6 << 3) | 3;
     __vmx_vmwrite(0x0000201A, eptp);
+    // Host state
     __vmx_vmwrite(0x00006C14, (UINT64)AllocContiguousPhys(8192, NULL) + 8192);
     __vmx_vmwrite(0x00006C00, __readcr0());
     __vmx_vmwrite(0x00006C02, __readcr4());
     __vmx_vmwrite(0x00006800, __readcr0());
     __vmx_vmwrite(0x00006802, __readcr4());
+    // HOST_RIP
+    extern ULONG_PTR VmxExitEntry;
+    __vmx_vmwrite(0x00006C16, (ULONG_PTR)&VmxExitEntry);
+    // HOST_CR3
+    __vmx_vmwrite(0x00006C06, __readcr3());
+    // HOST_GDTR_BASE, HOST_IDTR_BASE
+    GDTR gdtr; IDTR idtr;
+    _sgdt(&gdtr); __sidt(&idtr);
+    __vmx_vmwrite(0x00006C0A, gdtr.Base);
+    __vmx_vmwrite(0x00006C0C, idtr.Base);
+    // HOST_CS, DS, SS
+    __vmx_vmwrite(0x00000C02, __readcs());
+    __vmx_vmwrite(0x00000C04, 0); // DS
+    __vmx_vmwrite(0x00000C06, 0); // SS
+
     UINT32 primaryCtrl; __vmx_vmread(0x00004002, &primaryCtrl);
     primaryCtrl |= 0x80000000; __vmx_vmwrite(0x00004002, primaryCtrl);
     UINT32 secondaryCtrl; __vmx_vmread(0x0000401E, &secondaryCtrl);
