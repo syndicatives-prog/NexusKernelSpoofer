@@ -2,6 +2,7 @@
 #include "hooks.h"
 #include "hypervisor.h"
 #include "svm.h"
+#include "smp_vmx.h"
 #include "../spoofers/disk_spoofer.h"
 #include "../spoofers/volume_spoofer.h"
 #include "../spoofers/registry_spoofer.h"
@@ -84,6 +85,7 @@ void DriverUnload(PDRIVER_OBJECT DriverObject) {
     CleanupRegistrySpoofer();
     CleanupVolumeSpoofer();
     CleanupDiskSpoofer();
+    CleanupSmpVmx();
     if (IsAmdVSupported()) {
         CleanupAmdHypervisor();
     } else {
@@ -118,7 +120,6 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
     if (IsAmdVSupported()) {
         if (NT_SUCCESS(InitAmdHypervisor())) {
             hypervisorOk = TRUE;
-            // AMD no necesita VmxLaunch, iniciamos directamente los m?dulos
         }
     } else if (NT_SUCCESS(InitHypervisor())) {
         hypervisorOk = TRUE;
@@ -126,6 +127,7 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
     }
 
     if (hypervisorOk) {
+        InitSmpVmx();  // Inicializar VMX en todos los cores
         InitDiskSpoofer();
         InitVolumeSpoofer();
         InitRegistrySpoofer();

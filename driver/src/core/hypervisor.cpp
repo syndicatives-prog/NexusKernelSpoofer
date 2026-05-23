@@ -104,18 +104,20 @@ static ULONG DecodeInstructionLength(UINT64 Rip) {
     return 3;
 }
 
-static void SetMTF() {
+VOID SetMTF() {
     UINT32 procBased;
     __vmx_vmread(0x00004002, &procBased);
     procBased |= 0x00040000;
     __vmx_vmwrite(0x00004002, procBased);
 }
-static void ClearMTF() {
+
+VOID ClearMTF() {
     UINT32 procBased;
     __vmx_vmread(0x00004002, &procBased);
     procBased &= ~0x00040000;
     __vmx_vmwrite(0x00004002, procBased);
 }
+
 static void EmulateEptRead(UINT64 PhysAddr, PVOID FakePage) {
     PUINT64 pte = NULL;
     int retries = 0;
@@ -155,6 +157,7 @@ static void HandleCpuidExit() {
 }
 
 BOOLEAN HandleHvciExecuteViolation(UINT64 GuestPhysAddr, UINT64 GuestRip) {
+    // La implementaci?n real est? en hvci_bypass.cpp
     return FALSE;
 }
 
@@ -236,20 +239,17 @@ NTSTATUS InitHypervisor() {
     __vmx_vmwrite(0x00006800, __readcr0());
     __vmx_vmwrite(0x00006802, __readcr4());
 
-    // HOST_RIP -> VmxExitEntry (definida en hypervisor_asm.asm)
     extern ULONG_PTR VmxExitEntry;
-    __vmx_vmwrite(0x00006C16, (ULONG_PTR)&VmxExitEntry);
+    __vmx_vmwrite(0x00006C16, (ULONG_PTR)&VmxExitEntry); // HOST_RIP
 
-    // HOST_CR3
-    __vmx_vmwrite(0x00006C06, __readcr3());
+    __vmx_vmwrite(0x00006C06, __readcr3()); // HOST_CR3
 
-    // HOST_GDTR_BASE, HOST_IDTR_BASE
     GDTR gdtr; IDTR idtr;
     _sgdt(&gdtr); __sidt(&idtr);
     __vmx_vmwrite(0x00006C04, gdtr.Base); // HOST_GDTR_BASE
     __vmx_vmwrite(0x00006C06, idtr.Base); // HOST_IDTR_BASE
 
-    // HOST_CS, DS, SS, ES, FS, GS selectors
+    // HOST selectors
     __vmx_vmwrite(0x00000C02, __readcs());
     __vmx_vmwrite(0x00000C04, __readds());
     __vmx_vmwrite(0x00000C06, __readss());
@@ -257,14 +257,11 @@ NTSTATUS InitHypervisor() {
     __vmx_vmwrite(0x00000C0A, __readfs());
     __vmx_vmwrite(0x00000C0C, __readgs());
 
-    // HOST_TR_SELECTOR
-    __vmx_vmwrite(0x00000C0E, __readtr());
+    __vmx_vmwrite(0x00000C0E, __readtr()); // HOST_TR_SELECTOR
 
-    // HOST_FS_BASE, HOST_GS_BASE
     __vmx_vmwrite(0x00006C08, __readmsr(0xC0000100)); // FS_BASE
     __vmx_vmwrite(0x00006C0A, __readmsr(0xC0000101)); // GS_BASE
 
-    // Enable secondary controls and EPT
     UINT32 primaryCtrl; __vmx_vmread(0x00004002, &primaryCtrl);
     primaryCtrl |= 0x80000000; __vmx_vmwrite(0x00004002, primaryCtrl);
     UINT32 secondaryCtrl; __vmx_vmread(0x0000401E, &secondaryCtrl);

@@ -6,6 +6,8 @@ set(SOURCES
     driver/src/core/hooks.cpp
     driver/src/core/hypervisor.cpp
     driver/src/core/hypervisor_asm.asm
+    driver/src/core/svm.cpp
+    driver/src/core/smp_vmx.cpp
     driver/src/core/comm_channel.cpp
     driver/src/core/dynamic_ept.cpp
     driver/src/core/adaptive_spoofer.cpp
@@ -27,7 +29,6 @@ set(SOURCES
     driver/src/mapper/manual_mapper.cpp
 )
 
-# Zydis library (you must clone https://github.com/zyantific/zydis into libs/zydis)
 add_library(zydis STATIC libs/zydis/src/Zydis.c)
 target_include_directories(zydis PUBLIC libs/zydis/include)
 
