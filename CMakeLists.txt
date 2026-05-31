@@ -6,6 +6,7 @@ set(SOURCES
     driver/src/core/hooks.cpp
     driver/src/core/hypervisor.cpp
     driver/src/core/hypervisor_asm.asm
+    driver/src/core/vmcs_init.cpp
     driver/src/core/svm.cpp
     driver/src/core/smp_vmx.cpp
     driver/src/core/smp_svm.cpp

@@ -23,7 +23,6 @@ static PVOID AllocContiguousPhys(ULONG Size, UINT64* PhysAddr) {
     return buf;
 }
 
-// Wrapper temporal que registra el mapeo para luego liberarlo
 static PVOID MapPhysicalTemp(UINT64 PhysAddr, ULONG Size, PVOID* MappingToUnmap) {
     PHYSICAL_ADDRESS pa; pa.QuadPart = PhysAddr;
     PVOID va = MmMapIoSpace(pa, Size, MmNonCached);
@@ -55,9 +54,11 @@ PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr) {
         UINT64 base = pdpt[pdptIdx] & 0xFFFFC0000000ULL;
         for (int i = 0; i < 512; i++) pd[i] = (base + (i * 0x200000ULL)) | (pdpt[pdptIdx] & 0x7F) | 0x80;
         pdpt[pdptIdx] = pdPhys | 7;
-        __invept(1, NULL);
+        // Invalidate EPT
+        UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
+        InvEpt(1, desc);
         MmUnmapIoSpace(pdptMapping, 4096); MmUnmapIoSpace(pml4Mapping, 4096);
-        return NULL; // El caller volver? a intentar despu?s del split
+        return NULL;
     }
 
     UINT64 pdPhys = pdpt[pdptIdx] & ~0xFFFULL;
@@ -74,7 +75,8 @@ PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr) {
         UINT64 base = pd[pdIdx] & 0xFFFFFFFFFFE00000ULL;
         for (int i = 0; i < 512; i++) pt[i] = (base + (i * 0x1000ULL)) | (pd[pdIdx] & 0x7F) & ~0x80;
         pd[pdIdx] = ptPhys | 7;
-        __invept(1, NULL);
+        UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
+        InvEpt(1, desc);
         MmUnmapIoSpace(pdMapping, 4096); MmUnmapIoSpace(pdptMapping, 4096); MmUnmapIoSpace(pml4Mapping, 4096);
         return NULL;
     }
@@ -86,22 +88,17 @@ PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr) {
     int ptIdx = (GuestPhysAddr >> 12) & 0x1FF;
     PUINT64 pte = &pt[ptIdx];
 
-    // Liberar todos los mapeos excepto el de la PTE (el caller necesita que siga mapeado)
     MmUnmapIoSpace(pdMapping, 4096);
     MmUnmapIoSpace(pdptMapping, 4096);
     MmUnmapIoSpace(pml4Mapping, 4096);
 
-    // El caller DEBE liberar ptMapping despu?s de usar la PTE
-    // Devolvemos el mapeo para que lo libere externamente (guardar en variable global)
     extern PVOID g_LastPtMapping;
     g_LastPtMapping = ptMapping;
     return pte;
 }
 
-// Variable para liberar el ?ltimo mapeo de PT despu?s de usar la PTE
 PVOID g_LastPtMapping = NULL;
 
-// Wrapper de EptHidePage que libera el mapeo de la PTE
 VOID EptHidePage(UINT64 PhysAddr, BOOLEAN Hide) {
     PhysAddr &= ~0xFFFULL;
     PUINT64 pte = NULL;
@@ -112,7 +109,8 @@ VOID EptHidePage(UINT64 PhysAddr, BOOLEAN Hide) {
     }
     if (!pte) return;
     if (Hide) *pte &= ~1ULL; else *pte |= 1ULL;
-    __invept(1, NULL);
+    UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
+    InvEpt(1, desc);
     if (g_LastPtMapping) { MmUnmapIoSpace(g_LastPtMapping, 4096); g_LastPtMapping = NULL; }
 }
 
@@ -159,7 +157,8 @@ static void EmulateEptRead(UINT64 PhysAddr, PVOID FakePage) {
     if (!pte) return;
     UINT64 fakePhys = MmGetPhysicalAddress(FakePage).QuadPart;
     *pte = (fakePhys & ~0xFFFULL) | 7;
-    __invept(1, NULL);
+    UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
+    InvEpt(1, desc);
     if (g_LastPtMapping) { MmUnmapIoSpace(g_LastPtMapping, 4096); g_LastPtMapping = NULL; }
 }
 
@@ -202,12 +201,12 @@ extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip, PGUEST_REGS 
         SkipInstruction(GuestRip);
         break;
     }
-    case 47:
+    case 37: // Monitor Trap Flag (corregido)
         for (ULONG i = 0; i < g_PageCount; i++)
             if (g_HiddenPages[i]) EptHidePage(g_HiddenPages[i], TRUE);
         ClearMTF();
         break;
-    case 48:
+    case 48: // EPT violation
     {
         UINT64 gpa, qual;
         __vmx_vmread(0x2400, &gpa);
@@ -276,5 +275,4 @@ VOID CleanupHypervisor() {
     if (g_Vmx.HypervisorActive) { __vmx_off(); g_Vmx.HypervisorActive = FALSE; }
     if (g_Vmx.HostStackVa) { MmFreeContiguousMemory(g_Vmx.HostStackVa); g_Vmx.HostStackVa = NULL; }
     if (g_Vmx.EptPml4Va) { MmFreeContiguousMemory(g_Vmx.EptPml4Va); g_Vmx.EptPml4Va = NULL; }
-    // pdptVa deber?a guardarse en g_Vmx tambi?n; por simplicidad lo omitimos (se libera en DriverUnload)
 }

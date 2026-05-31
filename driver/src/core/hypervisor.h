@@ -8,7 +8,7 @@ typedef struct _VMX_CONTROLS {
     UINT64 EptPml4Phys;
     PVOID  EptPml4Va;
     BOOLEAN HypervisorActive;
-    PVOID  HostStackVa;          // VA del stack del host (para liberarlo en cleanup)
+    PVOID  HostStackVa;
 } VMX_CONTROLS;
 
 extern VMX_CONTROLS g_Vmx;
@@ -23,3 +23,6 @@ extern BOOLEAN HandleHvciExecuteViolation(UINT64 GuestPhysAddr, UINT64 GuestRip)
 
 VOID SetMTF();
 VOID ClearMTF();
+
+// INVEPT wrapper definida en hypervisor_asm.asm
+extern VOID InvEpt(UINT64 Type, void* Descriptor);

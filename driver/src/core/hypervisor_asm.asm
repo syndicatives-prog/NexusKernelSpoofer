@@ -5,6 +5,14 @@ extern InitVmcsGuestState : proc
 
 PUBLIC VmxExitEntry
 PUBLIC VmxLaunch
+PUBLIC InvEpt
+
+; InvEpt(Type, Descriptor)
+InvEpt PROC
+    mov rax, rcx
+    invept rax, [rdx]
+    ret
+InvEpt ENDP
 
 VmxLaunch PROC FRAME
     push rbx
@@ -25,17 +33,14 @@ VmxLaunch PROC FRAME
     .allocstack 20h
     .endprolog
 
-    ; Escribir GUEST_RSP
     mov  rax, rsp
     mov  rcx, 681Ch
     vmwrite rcx, rax
 
-    ; Escribir GUEST_RIP
     lea  rax, guest_return_point
     mov  rcx, 681Eh
     vmwrite rcx, rax
 
-    ; Escribir GUEST_RFLAGS
     pushfq
     pop  rax
     or   rax, 200h
@@ -45,7 +50,6 @@ VmxLaunch PROC FRAME
 
     vmlaunch
 
-    ; VMLAUNCH fall? ? leer error code
     mov  rcx, 4400h
     vmread rcx, rcx
     add  rsp, 20h

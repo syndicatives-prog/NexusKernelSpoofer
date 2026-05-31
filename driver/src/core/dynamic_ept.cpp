@@ -6,7 +6,7 @@ static KTIMER g_DynamicTimer;
 static KDPC g_DynamicDpc;
 static PVOID g_ReservedPages[8] = {0};
 static ULONG g_ReservedIndex = 0;
-static KSPIN_LOCK g_EptLock;  // Spinlock para sincronizaci?n multi-core
+static KSPIN_LOCK g_EptLock;
 
 extern UINT64 g_HiddenPages[];
 extern UCHAR* g_FakePages[];
@@ -50,9 +50,10 @@ static VOID RelocateOnePage(ULONG Index) {
         return;
     }
     *pte = (newPhys & ~0xFFFULL) | (*pte & 0xFFF);
-    __invept(1, NULL);
+    UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
+    InvEpt(1, desc);
 
-    ExFreePoolWithTag(oldFake, 'ekaF');
+    MmFreeContiguousMemory(oldFake);  // Corregido: MmFreeContiguousMemory en lugar de ExFreePoolWithTag
     g_HiddenPages[Index] = newPhys;
     g_FakePages[Index] = (UCHAR*)newVa;
 
@@ -83,6 +84,6 @@ NTSTATUS InitDynamicEpt() {
 VOID CleanupDynamicEpt() {
     KeCancelTimer(&g_DynamicTimer);
     for (int i = 0; i < 8; i++) {
-        if (g_ReservedPages[i]) ExFreePoolWithTag(g_ReservedPages[i], 'ekaF');
+        if (g_ReservedPages[i]) MmFreeContiguousMemory(g_ReservedPages[i]); // Corregido
     }
 }
