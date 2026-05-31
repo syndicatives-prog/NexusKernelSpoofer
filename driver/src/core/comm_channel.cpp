@@ -1,22 +1,44 @@
 #include "comm_channel.h"
+#include "common.h"
+
 static PVOID g_CommSection = NULL;
 static HANDLE g_CommSectionHandle = NULL;
 static PKEVENT g_RequestEvent = NULL;
 static PKEVENT g_ReplyEvent = NULL;
 static SPOOF_COMMAND* g_Command = NULL;
-static PKTHREAD g_WorkerThread = NULL;
+static HANDLE g_WorkerThreadHandle = NULL;
+static PKTHREAD g_WorkerThreadObj = NULL;
 
-typedef struct _SPOOF_COMMAND { ULONG CommandId; SPOOF_DATA Data; NTSTATUS Result; } SPOOF_COMMAND;
+typedef struct _SPOOF_COMMAND {
+    ULONG CommandId;
+    SPOOF_DATA Data;
+    NTSTATUS Result;
+} SPOOF_COMMAND;
 
 static VOID CommWorker(PVOID Context) {
     while (TRUE) {
         KeWaitForSingleObject(g_RequestEvent, Executive, KernelMode, FALSE, NULL);
         if (!g_Command) break;
+
         switch (g_Command->CommandId) {
-        case 1: RtlCopyMemory(&g_SpoofData, &g_Command->Data, sizeof(SPOOF_DATA)); g_Command->Result = STATUS_SUCCESS; break;
-        case 2: g_SpoofData.Enabled = TRUE; g_Command->Result = STATUS_SUCCESS; break;
-        case 3: g_SpoofData.Enabled = FALSE; g_Command->Result = STATUS_SUCCESS; break;
-        default: g_Command->Result = STATUS_INVALID_PARAMETER;
+        case 1: // SET
+            RtlCopyMemory(&g_SpoofData, &g_Command->Data, sizeof(SPOOF_DATA));
+            g_Command->Result = STATUS_SUCCESS;
+            break;
+        case 2: // ENABLE
+            g_SpoofData.Enabled = TRUE;
+            g_Command->Result = STATUS_SUCCESS;
+            break;
+        case 3: // DISABLE
+            g_SpoofData.Enabled = FALSE;
+            g_Command->Result = STATUS_SUCCESS;
+            break;
+        case 4: // GET
+            RtlCopyMemory(&g_Command->Data, &g_SpoofData, sizeof(SPOOF_DATA));
+            g_Command->Result = STATUS_SUCCESS;
+            break;
+        default:
+            g_Command->Result = STATUS_INVALID_PARAMETER;
         }
         KeSetEvent(g_ReplyEvent, IO_NO_INCREMENT, FALSE);
     }
@@ -45,13 +67,24 @@ NTSTATUS InitCommChannel() {
     InitializeObjectAttributes(&objAttr, &eventRepName, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
     status = ZwCreateEvent(&g_ReplyEvent, EVENT_ALL_ACCESS, &objAttr, SynchronizationEvent, FALSE);
     if (!NT_SUCCESS(status)) { ZwClose(g_RequestEvent); ZwClose(hSection); return status; }
-    status = PsCreateSystemThread(&g_WorkerThread, THREAD_ALL_ACCESS, NULL, NULL, NULL, CommWorker, NULL);
+
+    status = PsCreateSystemThread(&g_WorkerThreadHandle, THREAD_ALL_ACCESS, NULL, NULL, NULL, CommWorker, NULL);
     if (!NT_SUCCESS(status)) { ZwClose(g_ReplyEvent); ZwClose(g_RequestEvent); ZwClose(hSection); return status; }
+    status = ObReferenceObjectByHandle(g_WorkerThreadHandle, THREAD_ALL_ACCESS, *PsThreadType,
+                                       KernelMode, (PVOID*)&g_WorkerThreadObj, NULL);
+    ZwClose(g_WorkerThreadHandle);
+    if (!NT_SUCCESS(status)) { ZwClose(g_ReplyEvent); ZwClose(g_RequestEvent); ZwClose(hSection); return status; }
+
     return STATUS_SUCCESS;
 }
 
 VOID CleanupCommChannel() {
-    if (g_WorkerThread) { KeSetEvent(g_RequestEvent, IO_NO_INCREMENT, FALSE); KeWaitForSingleObject(g_WorkerThread, Executive, KernelMode, FALSE, NULL); ObDereferenceObject(g_WorkerThread); }
+    if (g_WorkerThreadObj) {
+        KeSetEvent(g_RequestEvent, IO_NO_INCREMENT, FALSE);
+        KeWaitForSingleObject(g_WorkerThreadObj, Executive, KernelMode, FALSE, NULL);
+        ObDereferenceObject(g_WorkerThreadObj);
+        g_WorkerThreadObj = NULL;
+    }
     if (g_CommSection) ZwUnmapViewOfSection(NtCurrentProcess(), g_CommSection);
     if (g_CommSectionHandle) ZwClose(g_CommSectionHandle);
     if (g_RequestEvent) ZwClose(g_RequestEvent);

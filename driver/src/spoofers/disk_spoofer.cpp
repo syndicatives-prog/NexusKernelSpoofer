@@ -5,6 +5,20 @@
 static PDRIVER_OBJECT g_DiskDriver = NULL;
 static PDRIVER_DISPATCH g_OriginalDiskDispatch = NULL;
 
+NTSTATUS DiskCompletion(PDEVICE_OBJECT DevObj, PIRP Irp, PVOID Context) {
+    UNREFERENCED_PARAMETER(DevObj);
+    UNREFERENCED_PARAMETER(Context);
+    if (NT_SUCCESS(Irp->IoStatus.Status)) {
+        PSTORAGE_DEVICE_DESCRIPTOR desc = (PSTORAGE_DEVICE_DESCRIPTOR)Irp->AssociatedIrp.SystemBuffer;
+        if (desc && desc->SerialNumberOffset && g_SpoofData.DiskSerial[0] != '\0') {
+            PCHAR serial = (PCHAR)desc + desc->SerialNumberOffset;
+            RtlStringCbCopyA(serial, 128, g_SpoofData.DiskSerial);
+        }
+    }
+    if (Irp->PendingReturned) IoMarkIrpPending(Irp);
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS HookedDiskDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     if (!g_SpoofData.Enabled) return g_OriginalDiskDispatch(DeviceObject, Irp);
     PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
@@ -12,15 +26,7 @@ NTSTATUS HookedDiskDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
         stack->Parameters.DeviceIoControl.IoControlCode == IOCTL_STORAGE_QUERY_PROPERTY) {
         PSTORAGE_PROPERTY_QUERY query = (PSTORAGE_PROPERTY_QUERY)Irp->AssociatedIrp.SystemBuffer;
         if (query && query->PropertyId == StorageDeviceProperty) {
-            NTSTATUS status = g_OriginalDiskDispatch(DeviceObject, Irp);
-            if (NT_SUCCESS(status)) {
-                PSTORAGE_DEVICE_DESCRIPTOR desc = (PSTORAGE_DEVICE_DESCRIPTOR)Irp->AssociatedIrp.SystemBuffer;
-                if (desc->SerialNumberOffset && g_SpoofData.DiskSerial[0] != '\0') {
-                    PCHAR serial = (PCHAR)desc + desc->SerialNumberOffset;
-                    RtlStringCbCopyA(serial, 128, g_SpoofData.DiskSerial);
-                }
-            }
-            return status;
+            IoSetCompletionRoutine(Irp, DiskCompletion, NULL, TRUE, TRUE, TRUE);
         }
     }
     return g_OriginalDiskDispatch(DeviceObject, Irp);
