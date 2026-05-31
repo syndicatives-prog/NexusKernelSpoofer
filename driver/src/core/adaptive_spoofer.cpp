@@ -50,9 +50,18 @@ static VOID AdaptToEnvironment() {
         RtlStringCbCopyA(g_SpoofData.SystemManufacturer, sizeof(g_SpoofData.SystemManufacturer), "Dell Inc.");
         // Actualizar p?ginas falsas (se podr?a hacer aqu? o esperar a la siguiente rotaci?n)
     } else if (IsAcModuleLoaded(L"BEService.sys")) {
-        // BattlEye: MAC aleatoria
-        g_SpoofData.MacAddress[0] = 0x00; g_SpoofData.MacAddress[1] = 0x15; g_SpoofData.MacAddress[2] = 0x5D;
-        for (int j = 3; j < 6; j++) g_SpoofData.MacAddress[j] = (UCHAR)(__rdtsc() & 0xFF);
+        // BattlEye: MAC aleatoria con mejor variación
+        g_SpoofData.MacAddress[0] = 0x00; 
+        g_SpoofData.MacAddress[1] = 0x15; 
+        g_SpoofData.MacAddress[2] = 0x5D;
+        // Use high-resolution timer for better randomness instead of correlated rdtsc
+        LARGE_INTEGER time;
+        KeQuerySystemTime(&time);
+        UINT32 seed = (UINT32)time.LowPart;
+        for (int j = 3; j < 6; j++) {
+            seed = seed * 1103515245 + 12345;  // Simple LCG for variety
+            g_SpoofData.MacAddress[j] = (UCHAR)((seed >> 16) & 0xFF);
+        }
     }
     // Si no hay AC, dejamos los valores por defecto
 }

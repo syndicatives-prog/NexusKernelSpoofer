@@ -92,8 +92,18 @@ NTSTATUS MapDriver(PVOID ImageBuffer, SIZE_T ImageSize, PDRIVER_OBJECT *OutDrive
     RtlZeroMemory(mappedBase, imageSize);
     RtlCopyMemory(mappedBase, ImageBuffer, nt->OptionalHeader.SizeOfHeaders);
     PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(nt);
-    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; i++, section++)
-        if (section->SizeOfRawData) RtlCopyMemory((PUCHAR)mappedBase + section->VirtualAddress, (PUCHAR)ImageBuffer + section->PointerToRawData, section->SizeOfRawData);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; i++, section++) {
+        if (section->SizeOfRawData) {
+            // Validate bounds: VirtualAddress + SizeOfRawData must not exceed SizeOfImage
+            if (section->VirtualAddress + section->SizeOfRawData > imageSize) {
+                ExFreePoolWithTag(mappedBase, 'paMn');
+                return STATUS_INVALID_IMAGE_FORMAT;  // PE malformed
+            }
+            RtlCopyMemory((PUCHAR)mappedBase + section->VirtualAddress,
+                         (PUCHAR)ImageBuffer + section->PointerToRawData,
+                         section->SizeOfRawData);
+        }
+    }
     if (!NT_SUCCESS(ResolveImports(mappedBase, nt))) { ExFreePoolWithTag(mappedBase, 'paMn'); return STATUS_UNSUCCESSFUL; }
     PerformRelocations(mappedBase, nt, mappedBase);
     typedef NTSTATUS (*PDRIVER_ENTRY)(PDRIVER_OBJECT, PUNICODE_STRING);

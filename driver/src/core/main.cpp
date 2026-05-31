@@ -62,6 +62,9 @@ NTSTATUS DeviceIoControl(PDEVICE_OBJECT, PIRP Irp) {
         ULONG imageSize = stack->Parameters.DeviceIoControl.InputBufferLength;
         PDRIVER_OBJECT mappedDrv = NULL;
         status = MapDriver(image, imageSize, &mappedDrv);
+        if (NT_SUCCESS(status) && mappedDrv) {
+            info = (ULONG_PTR)mappedDrv;  // Return driver object pointer to caller
+        }
         break;
     }
     }

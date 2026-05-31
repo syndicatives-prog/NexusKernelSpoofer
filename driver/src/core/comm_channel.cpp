@@ -101,6 +101,8 @@ NTSTATUS InitCommChannel() {
 
 VOID CleanupCommChannel() {
     if (g_WorkerThreadObj) {
+        // Signal shutdown by nullifying g_Command before waking the worker
+        g_Command = NULL;
         KeSetEvent(g_RequestEvent, IO_NO_INCREMENT, FALSE);
         KeWaitForSingleObject(g_WorkerThreadObj, Executive, KernelMode, FALSE, NULL);
         ObDereferenceObject(g_WorkerThreadObj);

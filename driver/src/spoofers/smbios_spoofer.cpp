@@ -20,9 +20,18 @@ VOID SpoofRamInFakePage(PUCHAR FakePage, ULONG PageSize) {
     }
 }
 
-// Hook de IRP_MJ_SYSTEM_CONTROL para SMBIOS (corregido: usar IoStatus.Information)
+// Hook de IRP_MJ_SYSTEM_CONTROL para SMBIOS
+// NOTE: Solo procesamos IRPs completadas síncronamente para evitar use-after-free.
+// Si el driver original retorna STATUS_PENDING, no modificamos el IRP.
 static NTSTATUS HookedAcpiSystemControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     NTSTATUS status = g_OriginalSystemControl(DeviceObject, Irp);
+    
+    // Only process synchronously completed IRPs
+    if (status == STATUS_PENDING) {
+        // IRP will be completed asynchronously; we cannot access it further
+        return status;
+    }
+    
     if (!g_SpoofData.Enabled || !NT_SUCCESS(status)) return status;
 
     ULONG outLen = (ULONG)Irp->IoStatus.Information;

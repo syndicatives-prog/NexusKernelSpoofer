@@ -201,7 +201,9 @@ NTSTATUS InitVmcsGuestState(PVOID HostStackTop, ULONG_PTR HostRip) {
         RtlZeroMemory(msrBitmapVa, 4096); // All zero = no MSR interception
         UINT64 msrBitmapPhys = MmGetPhysicalAddress(msrBitmapVa).QuadPart;
         __vmx_vmwrite(VMCS_MSR_BITMAP, msrBitmapPhys);
-        // TODO: Save msrBitmapVa for cleanup in CleanupHypervisor()
+        // Save for cleanup
+        extern VMX_CONTROLS g_Vmx;
+        g_Vmx.MsrBitmapVa = msrBitmapVa;
     }
     
     __vmx_vmwrite(0x0000, 1); // VPID = 1

@@ -297,6 +297,7 @@ NTSTATUS InitHypervisor() {
 
 VOID CleanupHypervisor() {
     if (g_Vmx.HypervisorActive) { __vmx_off(); g_Vmx.HypervisorActive = FALSE; }
+    if (g_Vmx.MsrBitmapVa) { MmFreeContiguousMemory(g_Vmx.MsrBitmapVa); g_Vmx.MsrBitmapVa = NULL; }
     if (g_Vmx.HostStackVa) { MmFreeContiguousMemory(g_Vmx.HostStackVa); g_Vmx.HostStackVa = NULL; }
     if (g_Vmx.EptPml4Va) { MmFreeContiguousMemory(g_Vmx.EptPml4Va); g_Vmx.EptPml4Va = NULL; }
     if (g_Vmx.PdptVa)    { MmFreeContiguousMemory(g_Vmx.PdptVa);    g_Vmx.PdptVa    = NULL; }

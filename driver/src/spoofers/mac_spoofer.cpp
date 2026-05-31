@@ -31,10 +31,14 @@ static UINT64 FindNicMmioBase() {
     return 0;
 }
 
-// Offset conocido de la MAC dentro del espacio MMIO (depende de la NIC)
-// Para Intel E1000/E1000e, la MAC est? en los primeros 256 bytes, no en 0x5400.
-// Usamos 0x0000 como offset gen?rico (muchas NIC la tienen en los primeros bytes del BAR)
-#define MAC_OFFSET_IN_BAR  0x0000
+// Offset of MAC address within NIC MMIO space (varies by hardware)
+// WARNING: This offset is NIC-specific and may cause corruption if incorrect:
+// - Intel E1000/E1000e: MAC in RAH/RAL at 0x5400
+// - Realtek r8168: MAC at different offset (varies by version)
+// - Generic: 0x0000 may work for some NICs but risk of corrupting first DWORD
+// Current setting: 0x5400 is safer for modern Intel NICs
+// Set to 0xFFFFFFFF to disable MAC spoofing (avoid corruption risk)
+#define MAC_OFFSET_IN_BAR  0x5400  // Intel E1000e standard offset
 
 void InitMacSpoofer() {
     UINT64 bar0 = FindNicMmioBase();

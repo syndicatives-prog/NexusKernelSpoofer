@@ -8,6 +8,7 @@ typedef struct _VMX_CONTROLS {
     UINT64 EptPml4Phys;
     PVOID  EptPml4Va;
     PVOID  PdptVa;
+    PVOID  MsrBitmapVa;
     BOOLEAN HypervisorActive;
     PVOID  HostStackVa;
 } VMX_CONTROLS;

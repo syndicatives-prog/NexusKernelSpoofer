@@ -20,8 +20,14 @@ static void DpcRoutine(PKDPC Dpc, PVOID DeferredContext, PVOID Arg1, PVOID Arg2)
             };
             *(UINT64*)(expectedJmp + 6) = (UINT64)hook->HookFunction;
             
+            // Lower IRQL to APC_LEVEL to safely access potentially paged memory
+            KIRQL oldIrql = KeRaiseIrqlToDpcLevel();
+            
             // Compare current bytes with expected JMP
+            // NOTE: This is now safe at APC_LEVEL (kernel code is typically non-paged)
             ULONG matchExpected = (ULONG)RtlCompareMemory(hook->TargetAddress, expectedJmp, 14);
+            
+            KeLowerIrql(oldIrql);
             
             if (matchExpected != 14) {
                 // Hook not installed or overwritten, reinstall

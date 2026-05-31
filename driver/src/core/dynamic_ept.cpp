@@ -25,16 +25,19 @@ static VOID RelocateOnePage(ULONG Index) {
     KIRQL oldIrql;
     KeAcquireSpinLock(&g_EptLock, &oldIrql);
 
+    // Bounds check BEFORE accessing array
+    if (g_ReservedIndex >= 8) {
+        KeReleaseSpinLock(&g_EptLock, oldIrql);
+        return;
+    }
+
     UINT64 oldPhys = g_HiddenPages[Index];
     UCHAR* oldFake = g_FakePages[Index];
     if (!oldPhys || !oldFake) {
         KeReleaseSpinLock(&g_EptLock, oldIrql);
         return;
     }
-    if (g_ReservedIndex >= 8) {
-        KeReleaseSpinLock(&g_EptLock, oldIrql);
-        return;
-    }
+    
     PVOID newVa = g_ReservedPages[g_ReservedIndex];
     if (!newVa) {
         KeReleaseSpinLock(&g_EptLock, oldIrql);
@@ -44,9 +47,10 @@ static VOID RelocateOnePage(ULONG Index) {
     RtlCopyMemory(newVa, oldFake, 4096);
 
     PUINT64 pte = NULL;
+    PVOID ptMapping = NULL;
     int retries = 0;
     while (!pte && retries < 10) {
-        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, oldPhys);
+        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, oldPhys, &ptMapping);
         retries++;
     }
     if (!pte) {
@@ -56,17 +60,24 @@ static VOID RelocateOnePage(ULONG Index) {
     *pte = (newPhys & ~0xFFFULL) | (*pte & 0xFFF);
     UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
     InvEpt(1, desc);
+    if (ptMapping) MmUnmapIoSpace(ptMapping, 4096);
 
     MmFreeContiguousMemory(oldFake);
     g_HiddenPages[Index] = newPhys;
     g_FakePages[Index] = (UCHAR*)newVa;
 
+    // Save the index before incrementing
+    ULONG currentIndex = g_ReservedIndex;
+    g_ReservedIndex++;
+
     // Replenish the ring buffer slot with a new page
     PVOID newReserved = AllocContiguousPhysLocal(4096, NULL);
     if (newReserved) {
-        g_ReservedPages[g_ReservedIndex] = newReserved;
+        g_ReservedPages[currentIndex] = newReserved;
+    } else {
+        // If allocation fails, nullify the slot to prevent double-free
+        g_ReservedPages[currentIndex] = NULL;
     }
-    g_ReservedIndex++;
 
     KeReleaseSpinLock(&g_EptLock, oldIrql);
 }
