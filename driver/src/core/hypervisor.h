@@ -6,8 +6,9 @@ typedef struct _VMX_CONTROLS {
     UINT64 VmxonRegionPhys;
     UINT64 VmcsRegionPhys;
     UINT64 EptPml4Phys;
-    PVOID EptPml4Va;
+    PVOID  EptPml4Va;
     BOOLEAN HypervisorActive;
+    PVOID  HostStackVa;          // VA del stack del host (para liberarlo en cleanup)
 } VMX_CONTROLS;
 
 extern VMX_CONTROLS g_Vmx;
@@ -20,6 +21,5 @@ VOID CleanupHypervisor();
 extern VOID VmxLaunch(UINT64 HostStackPtr, UINT64 GuestRip);
 extern BOOLEAN HandleHvciExecuteViolation(UINT64 GuestPhysAddr, UINT64 GuestRip);
 
-// MTF functions (needed by hvci_bypass and EPT handler)
 VOID SetMTF();
 VOID ClearMTF();
