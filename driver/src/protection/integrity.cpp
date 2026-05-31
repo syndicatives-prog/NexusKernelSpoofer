@@ -7,7 +7,7 @@ extern HOOK_INFO* g_AllHooks[];
 static void DpcRoutine(PKDPC Dpc, PVOID DeferredContext, PVOID Arg1, PVOID Arg2) {
     for (int i = 0; g_AllHooks[i] != NULL; i++) {
         HOOK_INFO* hook = g_AllHooks[i];
-        if (hook->Installed && hook->HookFunction && RtlCompareMemory(hook->TargetAddress, hook->OriginalBytes, 5) == 5) {
+        if (hook->Installed && hook->HookFunction && RtlCompareMemory(hook->TargetAddress, hook->OriginalBytes, 14) == 14) {
             RemoveHookX64(hook);
             InstallHookX64(hook->TargetAddress, hook->HookFunction, hook);
         }

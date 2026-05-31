@@ -20,19 +20,20 @@ VOID SpoofRamInFakePage(PUCHAR FakePage, ULONG PageSize) {
     }
 }
 
-// Hook de IRP_MJ_SYSTEM_CONTROL para SMBIOS
+// Hook de IRP_MJ_SYSTEM_CONTROL para SMBIOS (corregido: usar Parameters.WMI)
 static NTSTATUS HookedAcpiSystemControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     NTSTATUS status = g_OriginalSystemControl(DeviceObject, Irp);
     if (!g_SpoofData.Enabled || !NT_SUCCESS(status)) return status;
 
     PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
-    PUCHAR outBuf = (PUCHAR)Irp->AssociatedIrp.SystemBuffer;
-    ULONG outLen = stack->Parameters.DeviceIoControl.OutputBufferLength;
+    // IRP_MJ_SYSTEM_CONTROL usa Parameters.WMI, no DeviceIoControl
+    PVOID outBuf = Irp->AssociatedIrp.SystemBuffer;
+    ULONG outLen = stack->Parameters.WMI.BufferLength;  // Corregido
 
     if (outBuf && outLen >= 0x18 && g_SpoofData.SMBIOS_UUID[0] != '\0') {
         for (ULONG i = 0; i < outLen - 0x19; i++) {
-            if (outBuf[i] == 0x01 && outBuf[i+1] >= 0x08) {
-                RtlCopyMemory(outBuf + i + 8, g_SpoofData.SMBIOS_UUID, 16);
+            if (((PUCHAR)outBuf)[i] == 0x01 && ((PUCHAR)outBuf)[i+1] >= 0x08) {
+                RtlCopyMemory((PUCHAR)outBuf + i + 8, g_SpoofData.SMBIOS_UUID, 16);
                 break;
             }
         }
@@ -47,7 +48,6 @@ void InitSmbiosSpoofer() {
         *IoDriverObjectType, KernelMode, NULL, (PVOID*)&driver))) return;
     g_AcpiDriver = driver;
     g_OriginalSystemControl = driver->MajorFunction[IRP_MJ_SYSTEM_CONTROL];
-    // Instalar el hook ? antes solo guardaba el puntero
     InstallHookX64(g_OriginalSystemControl, HookedAcpiSystemControl, &g_SmbiosHook);
 }
 

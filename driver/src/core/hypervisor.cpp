@@ -32,7 +32,8 @@ static PVOID MapPhysicalTemp(UINT64 PhysAddr, ULONG Size, PVOID* MappingToUnmap)
 
 static UINT64 AdjustCr4(UINT64 cr4) { return cr4 | (1ULL << 13); }
 
-PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr) {
+// ?? EptSplitTo4Kb con OutPtMapping ????????????????????????????????????????????
+PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr, PVOID* OutPtMapping) {
     GuestPhysAddr &= ~0xFFFULL;
     PVOID pml4Mapping = NULL;
     UINT64* pml4 = (UINT64*)MapPhysicalTemp(Pml4Phys, 4096, &pml4Mapping);
@@ -54,7 +55,6 @@ PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr) {
         UINT64 base = pdpt[pdptIdx] & 0xFFFFC0000000ULL;
         for (int i = 0; i < 512; i++) pd[i] = (base + (i * 0x200000ULL)) | (pdpt[pdptIdx] & 0x7F) | 0x80;
         pdpt[pdptIdx] = pdPhys | 7;
-        // Invalidate EPT
         UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
         InvEpt(1, desc);
         MmUnmapIoSpace(pdptMapping, 4096); MmUnmapIoSpace(pml4Mapping, 4096);
@@ -92,26 +92,25 @@ PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr) {
     MmUnmapIoSpace(pdptMapping, 4096);
     MmUnmapIoSpace(pml4Mapping, 4096);
 
-    extern PVOID g_LastPtMapping;
-    g_LastPtMapping = ptMapping;
+    *OutPtMapping = ptMapping;
     return pte;
 }
 
-PVOID g_LastPtMapping = NULL;
-
+// ?? EptHidePage adaptado a OutPtMapping ?????????????????????????????????????
 VOID EptHidePage(UINT64 PhysAddr, BOOLEAN Hide) {
     PhysAddr &= ~0xFFFULL;
+    PVOID ptMapping = NULL;
     PUINT64 pte = NULL;
     int retries = 0;
     while (!pte && retries < 10) {
-        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr);
+        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr, &ptMapping);
         retries++;
     }
     if (!pte) return;
     if (Hide) *pte &= ~1ULL; else *pte |= 1ULL;
     UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
     InvEpt(1, desc);
-    if (g_LastPtMapping) { MmUnmapIoSpace(g_LastPtMapping, 4096); g_LastPtMapping = NULL; }
+    if (ptMapping) { MmUnmapIoSpace(ptMapping, 4096); ptMapping = NULL; }
 }
 
 VOID EptSetFakePage(UINT64 PhysAddr, PVOID FakePageVa) {
@@ -148,10 +147,11 @@ VOID ClearMTF() {
 }
 
 static void EmulateEptRead(UINT64 PhysAddr, PVOID FakePage) {
+    PVOID ptMapping = NULL;
     PUINT64 pte = NULL;
     int retries = 0;
     while (!pte && retries < 10) {
-        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr);
+        pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr, &ptMapping);
         retries++;
     }
     if (!pte) return;
@@ -159,7 +159,7 @@ static void EmulateEptRead(UINT64 PhysAddr, PVOID FakePage) {
     *pte = (fakePhys & ~0xFFFULL) | 7;
     UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
     InvEpt(1, desc);
-    if (g_LastPtMapping) { MmUnmapIoSpace(g_LastPtMapping, 4096); g_LastPtMapping = NULL; }
+    if (ptMapping) { MmUnmapIoSpace(ptMapping, 4096); ptMapping = NULL; }
 }
 
 static void SkipInstruction(UINT64 GuestRip) {
@@ -186,14 +186,17 @@ extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip, PGUEST_REGS 
         SkipInstruction(GuestRip);
         break;
     }
-    case 16: case 17:
+    case 16: // RDTSC
     {
         UINT64 tsc = __rdtsc() - 500;
         Regs->rax = (UINT32)tsc; Regs->rdx = (UINT32)(tsc >> 32);
         SkipInstruction(GuestRip);
         break;
     }
-    case 31:
+    case 17: // VMCALL ? no tocar GPRs, solo avanzar RIP
+        SkipInstruction(GuestRip);
+        break;
+    case 31: // RDMSR
     {
         UINT32 msrId = (UINT32)Regs->rcx;
         UINT64 val = (msrId == 0x3A || msrId == 0xE7 || msrId == 0xE8) ? 0 : __readmsr(msrId);
@@ -201,7 +204,7 @@ extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip, PGUEST_REGS 
         SkipInstruction(GuestRip);
         break;
     }
-    case 37: // Monitor Trap Flag (corregido)
+    case 37: // Monitor Trap Flag
         for (ULONG i = 0; i < g_PageCount; i++)
             if (g_HiddenPages[i]) EptHidePage(g_HiddenPages[i], TRUE);
         ClearMTF();

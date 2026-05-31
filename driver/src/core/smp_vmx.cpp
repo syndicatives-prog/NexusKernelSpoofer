@@ -12,7 +12,13 @@ typedef struct _PER_CORE_VMX {
 static PER_CORE_VMX* g_PerCoreVmx = NULL;
 static ULONG g_NumCores = 0;
 
-static VOID PerCoreInitCallback(PVOID Context) {
+// Callback con firma correcta para KeGenericCallDpc
+static VOID PerCoreInitCallback(PKDPC Dpc, PVOID Context, PVOID Arg1, PVOID Arg2) {
+    UNREFERENCED_PARAMETER(Dpc);
+    UNREFERENCED_PARAMETER(Context);
+    UNREFERENCED_PARAMETER(Arg1);
+    UNREFERENCED_PARAMETER(Arg2);
+
     ULONG coreIndex = KeGetCurrentProcessorNumber();
     if (coreIndex >= g_NumCores) return;
 
@@ -55,6 +61,25 @@ static VOID PerCoreInitCallback(PVOID Context) {
     core->Active = TRUE;
 }
 
+// Callback de limpieza ejecutado en cada core
+static VOID PerCoreCleanupCallback(PKDPC Dpc, PVOID Context, PVOID Arg1, PVOID Arg2) {
+    UNREFERENCED_PARAMETER(Dpc);
+    UNREFERENCED_PARAMETER(Context);
+    UNREFERENCED_PARAMETER(Arg1);
+    UNREFERENCED_PARAMETER(Arg2);
+
+    ULONG coreIndex = KeGetCurrentProcessorNumber();
+    if (coreIndex >= g_NumCores) return;
+
+    PER_CORE_VMX* core = &g_PerCoreVmx[coreIndex];
+    if (core->Active) {
+        __vmx_off();  // Ahora se ejecuta en el core correcto
+        core->Active = FALSE;
+    }
+    if (core->VmcsVa)  { MmFreeContiguousMemory(core->VmcsVa);  core->VmcsVa  = NULL; }
+    if (core->VmxonVa) { MmFreeContiguousMemory(core->VmxonVa); core->VmxonVa = NULL; }
+}
+
 NTSTATUS InitSmpVmx() {
     if (!g_Vmx.HypervisorActive) return STATUS_NOT_SUPPORTED;
     g_NumCores = KeNumberProcessors;
@@ -74,13 +99,8 @@ NTSTATUS InitSmpVmx() {
 
 VOID CleanupSmpVmx() {
     if (!g_PerCoreVmx) return;
-    for (ULONG i = 0; i < g_NumCores; i++) {
-        if (g_PerCoreVmx[i].Active) {
-            __vmx_off();
-        }
-        if (g_PerCoreVmx[i].VmcsVa)  MmFreeContiguousMemory(g_PerCoreVmx[i].VmcsVa);
-        if (g_PerCoreVmx[i].VmxonVa) MmFreeContiguousMemory(g_PerCoreVmx[i].VmxonVa);
-    }
+    // Ejecutar __vmx_off en cada core que lo activ?
+    KeGenericCallDpc(PerCoreCleanupCallback, NULL);
     ExFreePoolWithTag(g_PerCoreVmx, 'pmvS');
     g_PerCoreVmx = NULL;
 }

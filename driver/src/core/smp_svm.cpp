@@ -13,7 +13,13 @@ typedef struct _PER_CORE_SVM {
 static PER_CORE_SVM* g_PerCoreSvm = NULL;
 static ULONG g_NumCores = 0;
 
-static VOID PerCoreInitCallback(PVOID Context) {
+// Firma corregida para KeGenericCallDpc
+static VOID PerCoreInitCallback(PKDPC Dpc, PVOID Context, PVOID Arg1, PVOID Arg2) {
+    UNREFERENCED_PARAMETER(Dpc);
+    UNREFERENCED_PARAMETER(Context);
+    UNREFERENCED_PARAMETER(Arg1);
+    UNREFERENCED_PARAMETER(Arg2);
+
     ULONG coreIndex = KeGetCurrentProcessorNumber();
     if (coreIndex >= g_NumCores) return;
 
