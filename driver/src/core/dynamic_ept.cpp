@@ -35,7 +35,11 @@ static VOID RelocateOnePage(ULONG Index) {
         KeReleaseSpinLock(&g_EptLock, oldIrql);
         return;
     }
-    PVOID newVa = g_ReservedPages[g_ReservedIndex++];
+    PVOID newVa = g_ReservedPages[g_ReservedIndex];
+    if (!newVa) {
+        KeReleaseSpinLock(&g_EptLock, oldIrql);
+        return;
+    }
     UINT64 newPhys = MmGetPhysicalAddress(newVa).QuadPart;
     RtlCopyMemory(newVa, oldFake, 4096);
 
@@ -53,9 +57,16 @@ static VOID RelocateOnePage(ULONG Index) {
     UINT64 desc[2] = {g_Vmx.EptPml4Phys, 0};
     InvEpt(1, desc);
 
-    MmFreeContiguousMemory(oldFake);  // Corregido: MmFreeContiguousMemory en lugar de ExFreePoolWithTag
+    MmFreeContiguousMemory(oldFake);
     g_HiddenPages[Index] = newPhys;
     g_FakePages[Index] = (UCHAR*)newVa;
+
+    // Replenish the ring buffer slot with a new page
+    PVOID newReserved = AllocContiguousPhysLocal(4096, NULL);
+    if (newReserved) {
+        g_ReservedPages[g_ReservedIndex] = newReserved;
+    }
+    g_ReservedIndex++;
 
     KeReleaseSpinLock(&g_EptLock, oldIrql);
 }

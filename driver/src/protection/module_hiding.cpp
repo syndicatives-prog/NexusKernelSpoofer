@@ -3,14 +3,7 @@
 #include "hooks.h"
 typedef NTSTATUS (*NTQUERYSYSTEMINFORMATION)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 static NTQUERYSYSTEMINFORMATION g_Original = NULL;
-typedef struct _SYSTEM_MODULE_ENTRY {
-    PVOID  Section; PVOID  MappedBase; PVOID  ImageBase;
-    ULONG  ImageSize; ULONG  Flags;
-    USHORT LoadOrderIndex; USHORT InitOrderIndex;
-    USHORT LoadCount; USHORT OffsetToFileName;
-    UCHAR  FullPathName[256];
-} SYSTEM_MODULE_ENTRY;
-typedef struct _SYSTEM_MODULE_INFORMATION { ULONG ModulesCount; SYSTEM_MODULE_ENTRY Modules[1]; } SYSTEM_MODULE_INFORMATION;
+
 static NTSTATUS Hooked(SYSTEM_INFORMATION_CLASS SystemInformationClass,
                        PVOID SystemInformation, ULONG SystemInformationLength, PULONG ReturnLength) {
     NTSTATUS status = g_Original(SystemInformationClass, SystemInformation, SystemInformationLength, ReturnLength);

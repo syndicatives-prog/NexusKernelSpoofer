@@ -40,16 +40,37 @@ static NTSTATUS HookedAcpiSystemControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 }
 
 void InitSmbiosSpoofer() {
-    UNICODE_STRING name; RtlInitUnicodeString(&name, L"\\Driver\\ACPI");
+    UNICODE_STRING name; 
+    RtlInitUnicodeString(&name, L"\\Driver\\ACPI");
     PDRIVER_OBJECT driver;
     if (!NT_SUCCESS(ObReferenceObjectByName(&name, OBJ_CASE_INSENSITIVE, NULL, 0,
         *IoDriverObjectType, KernelMode, NULL, (PVOID*)&driver))) return;
     g_AcpiDriver = driver;
+    // Save original and replace slot directly (not inline hook to avoid loop)
     g_OriginalSystemControl = driver->MajorFunction[IRP_MJ_SYSTEM_CONTROL];
-    InstallHookX64(g_OriginalSystemControl, HookedAcpiSystemControl, &g_SmbiosHook);
+    KIRQL irql = KeRaiseIrqlToDpcLevel();
+    ULONG_PTR cr0 = __readcr0(); 
+    __writecr0(cr0 & ~0x10000UL);  // Disable WP
+    driver->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = HookedAcpiSystemControl;
+    __writecr0(cr0 | 0x10000UL);   // Re-enable WP
+    KeLowerIrql(irql);
+    g_SmbiosHook.Installed = TRUE;
+    g_SmbiosHook.TargetAddress = &driver->MajorFunction[IRP_MJ_SYSTEM_CONTROL];
+    g_SmbiosHook.HookFunction = HookedAcpiSystemControl;
 }
 
 void CleanupSmbiosSpoofer() {
-    RemoveHookX64(&g_SmbiosHook);
-    if (g_AcpiDriver) ObDereferenceObject(g_AcpiDriver);
+    if (g_SmbiosHook.Installed && g_AcpiDriver) {
+        KIRQL irql = KeRaiseIrqlToDpcLevel();
+        ULONG_PTR cr0 = __readcr0(); 
+        __writecr0(cr0 & ~0x10000UL);  // Disable WP
+        g_AcpiDriver->MajorFunction[IRP_MJ_SYSTEM_CONTROL] = g_OriginalSystemControl;
+        __writecr0(cr0 | 0x10000UL);   // Re-enable WP
+        KeLowerIrql(irql);
+        g_SmbiosHook.Installed = FALSE;
+    }
+    if (g_AcpiDriver) { 
+        ObDereferenceObject(g_AcpiDriver); 
+        g_AcpiDriver = NULL; 
+    }
 }

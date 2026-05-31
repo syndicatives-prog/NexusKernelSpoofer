@@ -34,10 +34,29 @@ typedef struct _SPOOF_DATA {
 } SPOOF_DATA, *PSPOOF_DATA;
 
 typedef struct _SPOOF_COMMAND {
-    INT CommandId;
+    ULONG    CommandId;
     SPOOF_DATA Data;
-    INT Result;
+    NTSTATUS Result;
 } SPOOF_COMMAND, *PSPOOF_COMMAND;
+
+// System Module Information structures (used by module_hiding.cpp and adaptive_spoofer.cpp)
+typedef struct _SYSTEM_MODULE_ENTRY {
+    PVOID  Section;
+    PVOID  MappedBase;
+    PVOID  ImageBase;
+    ULONG  ImageSize;
+    ULONG  Flags;
+    USHORT LoadOrderIndex;
+    USHORT InitOrderIndex;
+    USHORT LoadCount;
+    USHORT OffsetToFileName;
+    UCHAR  FullPathName[256];
+} SYSTEM_MODULE_ENTRY, *PSYSTEM_MODULE_ENTRY;
+
+typedef struct _SYSTEM_MODULE_INFORMATION {
+    ULONG ModulesCount;
+    SYSTEM_MODULE_ENTRY Modules[1];
+} SYSTEM_MODULE_INFORMATION, *PSYSTEM_MODULE_INFORMATION;
 
 #pragma pack()
 

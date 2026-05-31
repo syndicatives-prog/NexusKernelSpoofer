@@ -11,8 +11,14 @@ NTSTATUS DiskCompletion(PDEVICE_OBJECT DevObj, PIRP Irp, PVOID Context) {
     if (NT_SUCCESS(Irp->IoStatus.Status)) {
         PSTORAGE_DEVICE_DESCRIPTOR desc = (PSTORAGE_DEVICE_DESCRIPTOR)Irp->AssociatedIrp.SystemBuffer;
         if (desc && desc->SerialNumberOffset && g_SpoofData.DiskSerial[0] != '\0') {
-            PCHAR serial = (PCHAR)desc + desc->SerialNumberOffset;
-            RtlStringCbCopyA(serial, 128, g_SpoofData.DiskSerial);
+            // Calculate safe available length to prevent buffer overflow
+            ULONG safeLen = desc->Size > desc->SerialNumberOffset 
+                            ? desc->Size - desc->SerialNumberOffset 
+                            : 0;
+            if (safeLen > 0) {
+                PCHAR serial = (PCHAR)desc + desc->SerialNumberOffset;
+                RtlStringCbCopyA(serial, min(safeLen, 128UL), g_SpoofData.DiskSerial);
+            }
         }
     }
     if (Irp->PendingReturned) IoMarkIrpPending(Irp);
@@ -40,11 +46,31 @@ void InitDiskSpoofer() {
         *IoDriverObjectType, KernelMode, NULL, (PVOID*)&driver);
     if (!NT_SUCCESS(status)) return;
     g_DiskDriver = driver;
+    // Save original and replace slot directly (not inline hook to avoid loop)
     g_OriginalDiskDispatch = driver->MajorFunction[IRP_MJ_DEVICE_CONTROL];
-    InstallHookX64(g_OriginalDiskDispatch, HookedDiskDeviceControl, &g_DiskHook);
+    KIRQL irql = KeRaiseIrqlToDpcLevel();
+    ULONG_PTR cr0 = __readcr0(); 
+    __writecr0(cr0 & ~0x10000UL);  // Disable WP
+    driver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = HookedDiskDeviceControl;
+    __writecr0(cr0 | 0x10000UL);   // Re-enable WP
+    KeLowerIrql(irql);
+    g_DiskHook.Installed = TRUE;
+    g_DiskHook.TargetAddress = &driver->MajorFunction[IRP_MJ_DEVICE_CONTROL];
+    g_DiskHook.HookFunction = HookedDiskDeviceControl;
 }
 
 void CleanupDiskSpoofer() {
-    RemoveHookX64(&g_DiskHook);
-    if (g_DiskDriver) ObDereferenceObject(g_DiskDriver);
+    if (g_DiskHook.Installed && g_DiskDriver) {
+        KIRQL irql = KeRaiseIrqlToDpcLevel();
+        ULONG_PTR cr0 = __readcr0(); 
+        __writecr0(cr0 & ~0x10000UL);  // Disable WP
+        g_DiskDriver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = g_OriginalDiskDispatch;
+        __writecr0(cr0 | 0x10000UL);   // Re-enable WP
+        KeLowerIrql(irql);
+        g_DiskHook.Installed = FALSE;
+    }
+    if (g_DiskDriver) { 
+        ObDereferenceObject(g_DiskDriver); 
+        g_DiskDriver = NULL; 
+    }
 }

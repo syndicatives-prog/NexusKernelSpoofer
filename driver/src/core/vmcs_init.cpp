@@ -3,9 +3,11 @@
 #include <intrin.h>
 
 static UINT32 SegAccessRights(UINT16 Selector, UINT64 GdtBase) {
-    if (Selector == 0) return 0x10000;
+    if (Selector == 0) return 0x10000; // unusable
     PSEGMENT_DESCRIPTOR d = (PSEGMENT_DESCRIPTOR)(GdtBase + (Selector & ~7u));
-    return (UINT32)d->AccessByte | ((UINT32)(d->FlagsLimitHigh & 0xF0u) << 8);
+    UINT32 ar = (UINT32)d->AccessByte | ((UINT32)(d->FlagsLimitHigh & 0xF0u) << 8);
+    if (!(ar & 0x80)) ar |= 0x10000; // if present bit not set, mark unusable
+    return ar;
 }
 
 static UINT64 SegBase(UINT16 Selector, UINT64 GdtBase) {
@@ -191,7 +193,17 @@ NTSTATUS InitVmcsGuestState(PVOID HostStackTop, ULONG_PTR HostRip) {
             useTrueCtls ? MSR_VMX_TRUE_ENTRY : MSR_VMX_ENTRY_CTLS));
 
     __vmx_vmwrite(VMCS_EXCEPTION_BITMAP, 0);
-    __vmx_vmwrite(VMCS_MSR_BITMAP, 0);
+    
+    // Allocate and initialize MSR bitmap (required if "use MSR bitmap" bit is set)
+    PHYSICAL_ADDRESS highest; highest.QuadPart = -1;
+    PVOID msrBitmapVa = MmAllocateContiguousMemory(4096, highest);
+    if (msrBitmapVa) {
+        RtlZeroMemory(msrBitmapVa, 4096); // All zero = no MSR interception
+        UINT64 msrBitmapPhys = MmGetPhysicalAddress(msrBitmapVa).QuadPart;
+        __vmx_vmwrite(VMCS_MSR_BITMAP, msrBitmapPhys);
+        // TODO: Save msrBitmapVa for cleanup in CleanupHypervisor()
+    }
+    
     __vmx_vmwrite(0x0000, 1); // VPID = 1
 
     return STATUS_SUCCESS;

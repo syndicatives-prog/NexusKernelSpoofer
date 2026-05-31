@@ -3,16 +3,16 @@
 #include <ntimage.h>
 
 static PVOID GetModuleBaseByName(PCHAR ModuleName) {
-    PSYSTEM_MODULE_INFORMATION_EX info = NULL;
+    PSYSTEM_MODULE_INFORMATION info = NULL;
     ULONG infoSize = 0;
     NTSTATUS status = ZwQuerySystemInformation(SystemModuleInformation, NULL, 0, &infoSize);
     if (status != STATUS_INFO_LENGTH_MISMATCH || infoSize == 0) return NULL;
-    info = (PSYSTEM_MODULE_INFORMATION_EX)ExAllocatePoolWithTag(NonPagedPool, infoSize, 'mdlL');
+    info = (PSYSTEM_MODULE_INFORMATION)ExAllocatePoolWithTag(NonPagedPool, infoSize, 'mdlL');
     if (!info) return NULL;
     status = ZwQuerySystemInformation(SystemModuleInformation, info, infoSize, &infoSize);
     if (!NT_SUCCESS(status)) { ExFreePoolWithTag(info, 'mdlL'); return NULL; }
     PVOID base = NULL;
-    for (ULONG i = 0; i < info->NumberOfModules; i++) {
+    for (ULONG i = 0; i < info->ModulesCount; i++) {
         PCHAR path = (PCHAR)info->Modules[i].FullPathName + info->Modules[i].OffsetToFileName;
         if (_stricmp(path, ModuleName) == 0) { base = info->Modules[i].ImageBase; break; }
     }

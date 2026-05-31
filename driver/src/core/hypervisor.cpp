@@ -32,17 +32,160 @@ static PVOID MapPhysicalTemp(UINT64 PhysAddr, ULONG Size, PVOID* MappingToUnmap)
 
 static UINT64 AdjustCr4(UINT64 cr4) { return cr4 | (1ULL << 13); }
 
-PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr, PVOID* OutPtMapping) {
-    // (sin cambios)
+// SkipInstruction: read instruction length from VMCS and advance RIP
+static void SkipInstruction(UINT64 GuestRip) {
+    UINT64 instrLen = 0;
+    __vmx_vmread(0x440C, &instrLen); // VM_EXIT_INSTRUCTION_LEN
+    __vmx_vmwrite(0x681E, GuestRip + instrLen); // VMCS_GUEST_RIP
 }
 
-VOID EptHidePage(UINT64 PhysAddr, BOOLEAN Hide) { /* ... */ }
-VOID EptSetFakePage(UINT64 PhysAddr, PVOID FakePageVa) { /* ... */ }
-static ULONG DecodeInstructionLength(UINT64 Rip) { /* ... */ }
-VOID SetMTF() { /* ... */ }
-VOID ClearMTF() { /* ... */ }
-static void EmulateEptRead(UINT64 PhysAddr, PVOID FakePage) { /* ... */ }
-static void SkipInstruction(UINT64 GuestRip) { /* ... */ }
+// DecodeInstructionLength: fallback if needed outside vmexit (normally use VMCS)
+static ULONG DecodeInstructionLength(UINT64 Rip) {
+    // Without real Zydis integration, prefer VMCS field when available
+    UNREFERENCED_PARAMETER(Rip);
+    return 0;
+}
+
+// SetMTF / ClearMTF: bit 27 of Proc-Based VM-Exec Controls
+VOID SetMTF() {
+    UINT64 procCtrl = 0;
+    __vmx_vmread(0x4002, &procCtrl);
+    __vmx_vmwrite(0x4002, procCtrl | (1ULL << 27));
+}
+
+VOID ClearMTF() {
+    UINT64 procCtrl = 0;
+    __vmx_vmread(0x4002, &procCtrl);
+    __vmx_vmwrite(0x4002, procCtrl & ~(1ULL << 27));
+}
+
+// EptHidePage: remove R/W/X permissions from PTE for this physical page
+VOID EptHidePage(UINT64 PhysAddr, BOOLEAN Hide) {
+    PVOID dummy = NULL;
+    PUINT64 pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr, &dummy);
+    if (!pte) return;
+    if (Hide)
+        *pte &= ~7ULL;  // Remove R+W+X
+    else
+        *pte |= 7ULL;   // Restore R+W+X
+    UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
+    InvEpt(1, desc);
+    if (dummy) MmUnmapIoSpace(dummy, 4096);
+}
+
+// EptSetFakePage: redirect PTE entry to a different physical page (fake)
+VOID EptSetFakePage(UINT64 PhysAddr, PVOID FakePageVa) {
+    PVOID dummy = NULL;
+    PUINT64 pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, PhysAddr, &dummy);
+    if (!pte) return;
+    UINT64 fakePhys = MmGetPhysicalAddress(FakePageVa).QuadPart & ~0xFFFULL;
+    *pte = fakePhys | 7ULL; // R+W+X present
+    UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
+    InvEpt(1, desc);
+    if (dummy) MmUnmapIoSpace(dummy, 4096);
+}
+
+// EmulateEptRead: on EPT read violation, copy fake page to guest
+static void EmulateEptRead(UINT64 PhysAddr, PVOID FakePage) {
+    PHYSICAL_ADDRESS pa;
+    pa.QuadPart = PhysAddr;
+    PVOID mapped = MmMapIoSpace(pa, 4096, MmNonCached);
+    if (mapped) {
+        RtlCopyMemory(mapped, FakePage, 4096);
+        MmUnmapIoSpace(mapped, 4096);
+    }
+}
+
+// EptSplitTo4Kb: traverse or construct EPT hierarchy down to 4 KB PTE level
+PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr, PVOID* OutPtMapping) {
+    if (OutPtMapping) *OutPtMapping = NULL;
+
+    ULONG pml4Idx = (GuestPhysAddr >> 39) & 0x1FF;
+    ULONG pdptIdx = (GuestPhysAddr >> 30) & 0x1FF;
+    ULONG pdIdx   = (GuestPhysAddr >> 21) & 0x1FF;
+    ULONG ptIdx   = (GuestPhysAddr >> 12) & 0x1FF;
+
+    PHYSICAL_ADDRESS pa;
+    pa.QuadPart = Pml4Phys;
+    PUINT64 pml4 = (PUINT64)MmMapIoSpace(pa, 4096, MmNonCached);
+    if (!pml4) return NULL;
+
+    if (!(pml4[pml4Idx] & 1)) {
+        PHYSICAL_ADDRESS high;
+        high.QuadPart = -1;
+        PVOID pdptVa = MmAllocateContiguousMemory(4096, high);
+        if (!pdptVa) { MmUnmapIoSpace(pml4, 4096); return NULL; }
+        RtlZeroMemory(pdptVa, 4096);
+        UINT64 pdptPhys = MmGetPhysicalAddress(pdptVa).QuadPart;
+        pml4[pml4Idx] = pdptPhys | 7;
+    }
+    UINT64 pdptPhys = pml4[pml4Idx] & ~0xFFFULL;
+    MmUnmapIoSpace(pml4, 4096);
+
+    pa.QuadPart = pdptPhys;
+    PUINT64 pdpt = (PUINT64)MmMapIoSpace(pa, 4096, MmNonCached);
+    if (!pdpt) return NULL;
+
+    if (pdpt[pdptIdx] & (1ULL << 7)) {
+        UINT64 base1gb = pdpt[pdptIdx] & ~((1ULL << 30) - 1);
+        PHYSICAL_ADDRESS high;
+        high.QuadPart = -1;
+        PVOID pdVa = MmAllocateContiguousMemory(4096, high);
+        if (!pdVa) { MmUnmapIoSpace(pdpt, 4096); return NULL; }
+        RtlZeroMemory(pdVa, 4096);
+        PUINT64 pd2 = (PUINT64)pdVa;
+        for (int i = 0; i < 512; i++)
+            pd2[i] = (base1gb + i * 0x200000ULL) | 0x87;
+        UINT64 pdPhys2 = MmGetPhysicalAddress(pdVa).QuadPart;
+        pdpt[pdptIdx] = pdPhys2 | 7;
+    }
+    if (!(pdpt[pdptIdx] & 1)) {
+        PHYSICAL_ADDRESS high;
+        high.QuadPart = -1;
+        PVOID pdVa = MmAllocateContiguousMemory(4096, high);
+        if (!pdVa) { MmUnmapIoSpace(pdpt, 4096); return NULL; }
+        RtlZeroMemory(pdVa, 4096);
+        UINT64 pdPhys2 = MmGetPhysicalAddress(pdVa).QuadPart;
+        pdpt[pdptIdx] = pdPhys2 | 7;
+    }
+    UINT64 pdPhys = pdpt[pdptIdx] & ~0xFFFULL;
+    MmUnmapIoSpace(pdpt, 4096);
+
+    pa.QuadPart = pdPhys;
+    PUINT64 pd = (PUINT64)MmMapIoSpace(pa, 4096, MmNonCached);
+    if (!pd) return NULL;
+
+    if (pd[pdIdx] & (1ULL << 7)) {
+        UINT64 base2mb = pd[pdIdx] & ~((1ULL << 21) - 1);
+        PHYSICAL_ADDRESS high;
+        high.QuadPart = -1;
+        PVOID ptVa2 = MmAllocateContiguousMemory(4096, high);
+        if (!ptVa2) { MmUnmapIoSpace(pd, 4096); return NULL; }
+        RtlZeroMemory(ptVa2, 4096);
+        PUINT64 pt2 = (PUINT64)ptVa2;
+        for (int i = 0; i < 512; i++)
+            pt2[i] = (base2mb + i * 0x1000ULL) | 7;
+        UINT64 ptPhys2 = MmGetPhysicalAddress(ptVa2).QuadPart;
+        pd[pdIdx] = ptPhys2 | 7;
+    }
+    if (!(pd[pdIdx] & 1)) {
+        PHYSICAL_ADDRESS high;
+        high.QuadPart = -1;
+        PVOID ptVa2 = MmAllocateContiguousMemory(4096, high);
+        if (!ptVa2) { MmUnmapIoSpace(pd, 4096); return NULL; }
+        RtlZeroMemory(ptVa2, 4096);
+        UINT64 ptPhys2 = MmGetPhysicalAddress(ptVa2).QuadPart;
+        pd[pdIdx] = ptPhys2 | 7;
+    }
+    UINT64 ptPhys = pd[pdIdx] & ~0xFFFULL;
+    MmUnmapIoSpace(pd, 4096);
+
+    pa.QuadPart = ptPhys;
+    PUINT64 pt = (PUINT64)MmMapIoSpace(pa, 4096, MmNonCached);
+    if (!pt) return NULL;
+    if (OutPtMapping) *OutPtMapping = pt;
+    return &pt[ptIdx];
+}
 
 extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip, PGUEST_REGS Regs) {
     switch (ExitReason) {

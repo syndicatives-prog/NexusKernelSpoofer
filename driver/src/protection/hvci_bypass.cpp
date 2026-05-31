@@ -21,8 +21,9 @@ BOOLEAN HandleHvciExecuteViolation(UINT64 GuestPhysAddr, UINT64 GuestRip) {
         }
         if (!pte) return FALSE;
         *pte = (shadowPhys & ~0xFFFULL) | 7; // presente, RWX
-        __invept(1, NULL);
-        // Programar MTF para restaurar despu?s de la instrucci?n
+        UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
+        InvEpt(1, desc);
+        // Schedule MTF to restore after instruction
         SetMTF();
         return TRUE;
     }
@@ -55,7 +56,8 @@ NTSTATUS InitHvciBypass() {
             *pte &= ~4ULL; // quitar bit de ejecuci?n
         }
     }
-    __invept(1, NULL);
+    UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
+    InvEpt(1, desc);
     return STATUS_SUCCESS;
 }
 
@@ -76,6 +78,7 @@ VOID CleanupHvciBypass() {
             }
             if (pte) *pte |= 4ULL;
         }
-        __invept(1, NULL);
+        UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
+        InvEpt(1, desc);
     }
 }

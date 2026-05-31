@@ -126,7 +126,7 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
         }
     } else if (NT_SUCCESS(InitHypervisor())) {
         hypervisorOk = TRUE;
-        VmxLaunch(0, 0);
+        VmxLaunch(0, 0);  // Parameters unused; ASM uses rsp/rip from VMCS
         InitSmpVmx();  // SMP para Intel
     }
 

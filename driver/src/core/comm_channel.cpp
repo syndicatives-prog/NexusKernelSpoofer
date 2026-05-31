@@ -14,12 +14,6 @@ static SPOOF_COMMAND* g_Command = NULL;
 static HANDLE g_WorkerThreadHandle = NULL;
 static PKTHREAD g_WorkerThreadObj = NULL;
 
-typedef struct _SPOOF_COMMAND {
-    ULONG CommandId;
-    SPOOF_DATA Data;
-    NTSTATUS Result;
-} SPOOF_COMMAND;
-
 static VOID CommWorker(PVOID Context) {
     while (TRUE) {
         KeWaitForSingleObject(g_RequestEvent, Executive, KernelMode, FALSE, NULL);
