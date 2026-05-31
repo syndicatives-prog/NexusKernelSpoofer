@@ -7,6 +7,8 @@ typedef struct _PER_CORE_SVM {
     UINT64 GuestVmcbPhys;
     PVOID  HostVmcbVa;
     PVOID  GuestVmcbVa;
+    PVOID  NptPml4Va;
+    PVOID  NptPdptVa;
     BOOLEAN Active;
 } PER_CORE_SVM;
 
@@ -82,8 +84,9 @@ static VOID PerCoreInitCallback(PKDPC Dpc, PVOID Context, PVOID Arg1, PVOID Arg2
     // Write N_CR3 (Nested CR3) in guest VMCB to point to NPT
     *(UINT64*)((PUCHAR)guestVmcbVa + 0x0150) = nptPml4Phys;
     
-    // TODO: Store nptPml4Va and nptPdptVa in core structure for cleanup
-    // For now, memory will leak. Better: add NPT pointers to PER_CORE_SVM struct
+    // Store NPT pointers in core structure for cleanup
+    core->NptPml4Va = nptPml4Va;
+    core->NptPdptVa = nptPdptVa;
     
     core->Active = TRUE;
 }
@@ -108,6 +111,8 @@ NTSTATUS InitSmpSvm() {
 VOID CleanupSmpSvm() {
     if (!g_PerCoreSvm) return;
     for (ULONG i = 0; i < g_NumCores; i++) {
+        if (g_PerCoreSvm[i].NptPml4Va)  MmFreeContiguousMemory(g_PerCoreSvm[i].NptPml4Va);
+        if (g_PerCoreSvm[i].NptPdptVa)  MmFreeContiguousMemory(g_PerCoreSvm[i].NptPdptVa);
         if (g_PerCoreSvm[i].HostVmcbVa)  MmFreeContiguousMemory(g_PerCoreSvm[i].HostVmcbVa);
         if (g_PerCoreSvm[i].GuestVmcbVa) MmFreeContiguousMemory(g_PerCoreSvm[i].GuestVmcbVa);
     }
