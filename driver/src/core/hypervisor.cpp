@@ -189,7 +189,7 @@ PUINT64 EptSplitTo4Kb(UINT64 Pml4Phys, UINT64 GuestPhysAddr, PVOID* OutPtMapping
 
 extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip, PGUEST_REGS Regs) {
     switch (ExitReason) {
-    case 18: // CPUID ? corregido de 10 a 18
+    case 10: // CPUID (exit reason 10 per Intel SDM)
     {
         UINT32 func = (UINT32)Regs->rax;
         if (func == 0) {
@@ -213,7 +213,7 @@ extern "C" UINT64 VmexitHandler(UINT64 ExitReason, UINT64 GuestRip, PGUEST_REGS 
         SkipInstruction(GuestRip);
         break;
     }
-    case 17: // VMCALL ? no tocar GPRs, solo avanzar RIP
+    case 17: // VMCALL
         SkipInstruction(GuestRip);
         break;
     case 31: // RDMSR
