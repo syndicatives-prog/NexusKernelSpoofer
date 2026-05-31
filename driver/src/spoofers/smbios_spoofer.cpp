@@ -20,15 +20,13 @@ VOID SpoofRamInFakePage(PUCHAR FakePage, ULONG PageSize) {
     }
 }
 
-// Hook de IRP_MJ_SYSTEM_CONTROL para SMBIOS (corregido: usar Parameters.WMI)
+// Hook de IRP_MJ_SYSTEM_CONTROL para SMBIOS (corregido: usar IoStatus.Information)
 static NTSTATUS HookedAcpiSystemControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
     NTSTATUS status = g_OriginalSystemControl(DeviceObject, Irp);
     if (!g_SpoofData.Enabled || !NT_SUCCESS(status)) return status;
 
-    PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(Irp);
-    // IRP_MJ_SYSTEM_CONTROL usa Parameters.WMI, no DeviceIoControl
+    ULONG outLen = (ULONG)Irp->IoStatus.Information;
     PVOID outBuf = Irp->AssociatedIrp.SystemBuffer;
-    ULONG outLen = stack->Parameters.WMI.BufferLength;  // Corregido
 
     if (outBuf && outLen >= 0x18 && g_SpoofData.SMBIOS_UUID[0] != '\0') {
         for (ULONG i = 0; i < outLen - 0x19; i++) {
